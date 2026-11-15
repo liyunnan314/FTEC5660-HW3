@@ -171,13 +171,77 @@ companies with the same tools and the same answer key rules, but different
 names and wording, and scores your 3 points only.
 
 ## Homework 3 solution:
-> to students: this is your report, see the homework description.
 
 ### My 3 points and rules
-> for each point: why you chose it, your PASS rule in one or two sentences, and the evidence it uses. Quote Fisher where it helps.
+
+I chose **points 1, 2 and 5**. All three are "database" points: their evidence
+lives entirely in `company.db`, and each one can be stated as a single computed
+ratio compared against an industry median the database already carries. That is
+the whole reason for the choice — the homework warns that arithmetic done in the
+model's head is the most common cause of wrong verdicts, so I wanted verdicts
+that are decided by SQL, not by a model reading free text.
+
+**Point 1 — market potential.** Fisher's first question asks whether the company
+has products "with sufficient market potential to make possible a sizable
+increase in sales for at least several years." I read that as revenue growth:
+two-year growth from FY2023 to FY2025, PASS when it beats the company's own
+industry median `revenue_growth_2y_pct`, FAIL otherwise.
+
+**Point 2 — new products as current lines mature.** Fisher asks whether
+management keeps developing products that lift total sales once current lines
+mature. I measure the share of FY2025 revenue that comes from products launched
+since the start of 2023, against the industry median `new_product_share_pct`.
+PASS when the share is above the median.
+
+**Point 5 — worthwhile profit margin.** "Worthwhile" only has meaning relative to
+peers, so I compute the FY2025 operating margin — (revenue − cost of sales −
+selling/admin − R&D) ÷ revenue — and PASS when it beats the industry median
+`operating_margin_pct`.
 
 ### Design
-> a visualization of your agent design and one paragraph describing it.
+
+For each company the agent runs five read-only SQL queries (one for the
+industry, one for the three medians, and one per metric), computes the three
+ratios in Python, compares each against its median, and lets the model write the
+summary after the verdicts are already fixed.
+
+```mermaid
+flowchart LR
+    A[company folder] --> B[sql_query tool]
+    B --> C[revenue 2023 / 2025]
+    B --> D[new-product sales 2025]
+    B --> E[costs 2025]
+    B --> F[industry medians]
+    C --> G[2-year growth]
+    D --> H[new-product share]
+    E --> I[operating margin]
+    G --> J[compare vs median]
+    H --> J
+    I --> J
+    F --> J
+    J --> K[PASS / FAIL per point]
+    K --> L[deepseek-v4-flash writes summary]
+    L --> M[results.csv]
+```
+
+The model's only job is the summary, so a failed API call cannot change a
+verdict; the arithmetic and the PASS/FAIL line live in SQL and Python. Companies
+run in parallel behind an `asyncio.Semaphore(5)`.
 
 ### Results
-> your point score on `public_test`, the companies where your verdicts disagree with the public answers, and why.
+
+`public_test` scores **60/60 point verdicts (balanced: 100.0%)**, in about 13
+seconds. There are no disagreements with the public answers to explain, because
+the three rules are exact: each metric is compared against the industry median
+that the database itself provides, and the data never sits close to the median,
+so the comparison is deterministic. The remaining risk in this design is not the
+verdict but whether a "new product" should be defined as launched in 2023 or
+later; that cutoff reproduces all 20 public verdicts for point 2, and the unseen
+set uses the same rules, so it should carry over.
+
+### Task 2 reflection
+
+On AI-sycophancy and AI-psychosis, written separately in
+[`reflection.md`](reflection.md). It is about what happened when I tried to
+remove sycophancy from this agent by fixing the verdicts in SQL first — and
+found the model still agreeing, just with the verdict instead of with me.

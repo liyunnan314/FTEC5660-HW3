@@ -57,7 +57,40 @@ def load_env_file(path: Path = Path(".env")) -> None:
 
 # Choose any 3 of the 15 points, e.g. CHOSEN_POINTS = [1, 7, 15]. Your agent
 # gives a PASS or FAIL verdict on these 3 points only, with your own rule for each.
-CHOSEN_POINTS: list[int] = []  ### YOUR CODE HERE
+CHOSEN_POINTS: list[int] = [1, 2, 5]
+
+_MEDIAN_COLS = {1: "revenue_growth_2y_pct", 2: "new_product_share_pct", 5: "operating_margin_pct"}
+_METRIC_LABELS = {1: "2-year revenue growth", 2: "new product share", 5: "operating margin"}
+
+
+def _floats(text: str) -> list[float]:
+    """Every number in a sql_query table output, left to right."""
+    out = []
+    for line in text.strip().splitlines():
+        for token in line.split("|"):
+            try:
+                out.append(float(token.strip()))
+            except ValueError:
+                continue
+    return out
+
+
+async def _summarize(agent: Any, name: str, industry: str, metrics: dict[int, tuple[float, float]],
+                     points: dict[int, str]) -> str:
+    """Ask the model to write the short summary; verdicts are already decided."""
+    parts = []
+    for p in CHOSEN_POINTS:
+        value, median = metrics[p]
+        parts.append(f"{p}. {_METRIC_LABELS[p]}: {points[p]} ({value:.1f} vs industry median {median:.1f})")
+    prompt = (
+        f"You applied three of Fisher's points to {name}, a {industry} company. "
+        f"Write two or three plain sentences summarising these verdicts:\n" + "\n".join(parts)
+    )
+    try:
+        reply = await agent.ainvoke(prompt)
+        return reply.content if hasattr(reply, "content") else str(reply)
+    except Exception:
+        return ""
 
 
 def build_agent() -> Any:
@@ -71,8 +104,9 @@ def build_agent() -> Any:
     from .env. Each company has its own tools (see ``analyze_companies``), so
     you will probably create one tool-calling agent per company there.
     """
-    ### YOUR CODE HERE
-    return None
+    from langchain_deepseek import ChatDeepSeek
+
+    return ChatDeepSeek(model=MODEL_NAME, temperature=0, timeout=120, max_retries=3)
 
 
 async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict[str, dict[str, Any]]:
@@ -108,9 +142,60 @@ async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict
     entry for it: an exception here means no results.csv, which scores zero.
     You may analyse companies in parallel (e.g. ``asyncio.gather``).
     """
-    ### YOUR CODE HERE
-    _ = agent
-    return {name: {"points": {}, "summary": ""} for name in companies}
+    slots = asyncio.Semaphore(5)
+
+    async def ask(sql: Any, query: str) -> str:
+        out = await sql.ainvoke({"query": query})
+        return out.content if hasattr(out, "content") else str(out)
+
+    async def analyze(name: str, tools: list[Any]) -> tuple[str, dict[str, Any]]:
+        async with slots:
+            try:
+                return name, await _analyze_one(agent, name, tools, ask)
+            except Exception:
+                return name, {"points": {p: "FAIL" for p in CHOSEN_POINTS}, "summary": "Analysis failed."}
+
+    items = await asyncio.gather(*(analyze(name, tools) for name, tools in companies.items()))
+    return dict(items)
+
+
+async def _analyze_one(agent: Any, name: str, tools: list[Any], ask: Any) -> dict[str, Any]:
+    """Compute the three metrics with SQL, compare against the medians, then summarise."""
+    sql = tools[2]
+    industry = (await ask(sql, "SELECT industry FROM company")).strip().splitlines()[-1].strip()
+
+    medians = _floats(await ask(
+        sql,
+        f"SELECT revenue_growth_2y_pct, new_product_share_pct, operating_margin_pct "
+        f"FROM industry_medians WHERE industry = '{industry}'",
+    ))
+    growth = _floats(await ask(
+        sql,
+        "SELECT ROUND(100.0 * ((SELECT SUM(amount) FROM orders WHERE substr(order_date,1,4)='2025') / "
+        "(SELECT SUM(amount) FROM orders WHERE substr(order_date,1,4)='2023') - 1.0), 2)",
+    ))[0]
+    new_share = _floats(await ask(
+        sql,
+        "SELECT ROUND(100.0 * (SELECT SUM(o.amount) FROM orders o JOIN products p ON o.product=p.product "
+        "WHERE p.launch_date >= '2023-01-01' AND substr(o.order_date,1,4)='2025') / "
+        "(SELECT SUM(amount) FROM orders WHERE substr(order_date,1,4)='2025'), 2)",
+    ))[0]
+    margin = _floats(await ask(
+        sql,
+        "SELECT ROUND(100.0 * ((SELECT SUM(amount) FROM orders WHERE substr(order_date,1,4)='2025') - "
+        "(SELECT SUM(cost_of_sales)+SUM(selling_admin)+SUM(research_development) "
+        "FROM monthly_costs WHERE month LIKE '2025%')) / "
+        "(SELECT SUM(amount) FROM orders WHERE substr(order_date,1,4)='2025'), 2)",
+    ))[0]
+
+    g_med, np_med, m_med = medians[0], medians[1], medians[2]
+    metrics = {1: (growth, g_med), 2: (new_share, np_med), 5: (margin, m_med)}
+    points = {1: "PASS" if growth > g_med else "FAIL",
+              2: "PASS" if new_share > np_med else "FAIL",
+              5: "PASS" if margin > m_med else "FAIL"}
+
+    summary = await _summarize(agent, name, industry, metrics, points)
+    return {"points": points, "summary": summary}
 
 
 # Everything below is provided runner/scoring code. No edits are needed.
