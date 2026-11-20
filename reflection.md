@@ -10,10 +10,10 @@ I did that because I was afraid of what the model would do if I let it judge. A
 company clears it will, I suspected, lean toward saying yes. Most companies in
 the data do pass, "this is a promising company" is the more agreeable answer,
 and the grading metric itself punishes answering PASS everywhere. So I took the
-judgement away from it entirely. The arithmetic decides; the model narrates.
+judgement away from it entirely and left the model with nothing to do but
+narrate.
 
-What I did not expect is that the sycophancy did not disappear when I did that.
-It moved.
+What I did not expect is that the sycophancy did not disappear. It just moved.
 
 Look at what the model does in the summary step. I hand it a verdict that has
 already been decided — "Ashgrove fails the new-product test" — and it writes two
@@ -45,15 +45,12 @@ The two failures feel different but come from the same place. Sycophancy bends
 the answer toward what the listener wants to hear; psychosis bends it toward
 the story the model has already started telling. Both produce output that feels
 right, and both outsource the question of whether it is true to a process that
-is not actually checking. The fluent, confident, well-structured answer is the
-dangerous one precisely because nothing about fluency carries a signal about
-truth.
+is not actually checking. A fluent, confident answer is dangerous precisely
+because nothing about fluency tells you whether it is true.
 
 What I take from the week is that the reliability of an agent is not a property
 of how well the model writes. It is a property of what the model's claims are
 anchored to. My three points work because every verdict is anchored to a number
-I can check in a database, and the model's beautiful summaries can say whatever
-they like without moving the answer. The moment a claim is left to the model to
-justify on its own authority, sycophancy and psychosis are both waiting there —
-one to flatter, one to hallucinate, and neither to tell you the part you needed
-to hear.
+I can check in a database, and the model's summaries can say whatever they like
+without moving the answer. Where a claim has to be justified by the model on its
+own, sycophancy and psychosis are both waiting there.
